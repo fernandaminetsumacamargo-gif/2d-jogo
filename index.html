@@ -1,1 +1,379 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delivery Espacial</title>
+    
+    <style>
+        /* --- ESTILOS CSS --- */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
 
+        body {
+            background-color: #1a1a2e; /* Cor de espaço escuro */
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh; /* Ocupa 100% da altura da tela */
+        }
+
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 400px;
+            border: 4px solid #16213e;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: #0f3460; /* Fundo do jogo */
+        }
+
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 20px;
+            font-weight: bold;
+            z-index: 10;
+        }
+
+        /* Telas sobrepostas (Fim de Jogo / Vitória) */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 20;
+            text-align: center;
+        }
+
+        .overlay h1 {
+            font-size: 40px;
+            margin-bottom: 10px;
+            color: #e94560;
+        }
+
+        #victoryScreen h1 {
+            color: #4cd137;
+        }
+
+        .overlay p {
+            font-size: 18px;
+            margin-bottom: 20px;
+        }
+
+        .overlay button {
+            padding: 10px 20px;
+            font-size: 18px;
+            background-color: #e94560;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+
+        .overlay button:hover {
+            background-color: #c8324a;
+        }
+
+        /* Classe para esconder as telas */
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ESTRUTURA HTML DO JOGO -->
+    <div id="game-container">
+        <!-- Telas de Interface (UI) -->
+        <div id="hud">
+            <span>Pizzas: <span id="scoreDisplay">0</span></span>
+            <span>Vidas: <span id="livesDisplay">3</span></span>
+        </div>
+
+        <!-- Tela de Fim de Jogo -->
+        <div id="gameOverScreen" class="overlay hidden">
+            <h1>Fim de Jogo!</h1>
+            <p>A pizza esfriou... e os alienígenas comeram!</p>
+            <button onclick="reiniciarJogo()">Tentar Novamente</button>
+        </div>
+
+        <!-- Tela de Vitória -->
+        <div id="victoryScreen" class="overlay hidden">
+            <h1>Entrega Concluída!</h1>
+            <p>Você chegou à nave de resgate a tempo!</p>
+            <button onclick="reiniciarJogo()">Jogar Novamente</button>
+        </div>
+
+        <!-- Onde o jogo é desenhado -->
+        <canvas id="gameCanvas" width="800" height="400"></canvas>
+    </div>
+
+    <script>
+        // --- LÓGICA DO JOGO (JAVASCRIPT) ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Variáveis de controle de estado
+        let pontos = 0;
+        let vidas = 3;
+        let jogoRodando = true;
+
+        // Variáveis da física
+        const gravidade = 0.6;
+
+        // Controle de teclas (Quais teclas estão pressionadas)
+        const teclas = {};
+        window.addEventListener('keydown', (e) => teclas[e.key] = true);
+        window.addEventListener('keyup', (e) => teclas[e.key] = false);
+
+        // --- O JOGADOR (Entregador de Pizza) ---
+        let jogador = {
+            x: 50, y: 200, width: 30, height: 30,
+            vx: 0, vy: 0, 
+            velocidade: 5, forcaPulo: -12, noChao: false
+        };
+
+        // --- ELEMENTOS DO CENÁRIO ---
+        let plataformas = [];
+        let pizzas = [];
+        let inimigos = [];
+        let naveObjetivo = { x: 3200, y: 200, width: 80, height: 80 };
+
+        function carregarNivel() {
+            // Array de Plataformas {x, y, largura, altura}
+            plataformas = [
+                { x: 0, y: 350, w: 800, h: 50 },     // Chão 1
+                { x: 900, y: 350, w: 600, h: 50 },   // Chão 2 (pulo sobre cratera)
+                { x: 1200, y: 230, w: 100, h: 20 },  // Plataforma flutuante
+                { x: 1600, y: 350, w: 800, h: 50 },  // Chão 3
+                { x: 2500, y: 350, w: 800, h: 50 }   // Chão Final onde a nave está
+            ];
+
+            // Array de Pizzas (Moedas)
+            pizzas = [
+                { x: 400, y: 310, w: 20, h: 20, coletada: false },
+                { x: 1240, y: 190, w: 20, h: 20, coletada: false },
+                { x: 1700, y: 310, w: 20, h: 20, coletada: false },
+                { x: 1800, y: 200, w: 20, h: 20, coletada: false }
+            ];
+
+            // Inimigos (Alienígenas e Espinhos)
+            inimigos = [
+                { x: 600, y: 320, w: 30, h: 30, tipo: 'alien', vx: 2, minX: 500, maxX: 750 },
+                { x: 1300, y: 320, w: 30, h: 30, tipo: 'alien', vx: 2, minX: 1200, maxX: 1450 },
+                { x: 1000, y: 320, w: 30, h: 30, tipo: 'espinho' }
+            ];
+        }
+
+        // --- LÓGICA DE COLISÃO ---
+        function colide(ret1, ret2) {
+            return (ret1.x < ret2.x + (ret2.w || ret2.width) &&
+                    ret1.x + ret1.width > ret2.x &&
+                    ret1.y < ret2.y + (ret2.h || ret2.height) &&
+                    ret1.y + ret1.height > ret2.y);
+        }
+
+        // --- ATUALIZAÇÃO DO JOGO ---
+        function atualizar() {
+            if (!jogoRodando) return;
+
+            // 1. Movimento Horizontal
+            if (teclas['ArrowLeft'] || teclas['a'] || teclas['A']) jogador.vx = -jogador.velocidade;
+            else if (teclas['ArrowRight'] || teclas['d'] || teclas['D']) jogador.vx = jogador.velocidade;
+            else jogador.vx = 0;
+
+            jogador.x += jogador.vx;
+
+            // Colisão horizontal
+            for (let p of plataformas) {
+                if (colide(jogador, p)) {
+                    if (jogador.vx > 0) jogador.x = p.x - jogador.width;
+                    else if (jogador.vx < 0) jogador.x = p.x + p.w;
+                }
+            }
+
+            // 2. Movimento Vertical
+            if ((teclas[' '] || teclas['ArrowUp'] || teclas['w'] || teclas['W']) && jogador.noChao) {
+                jogador.vy = jogador.forcaPulo;
+                jogador.noChao = false;
+            }
+
+            jogador.vy += gravidade;
+            jogador.y += jogador.vy;
+            jogador.noChao = false;
+
+            // Colisão vertical
+            for (let p of plataformas) {
+                if (colide(jogador, p)) {
+                    if (jogador.vy > 0) {
+                        jogador.y = p.y - jogador.height;
+                        jogador.vy = 0;
+                        jogador.noChao = true;
+                    } else if (jogador.vy < 0) {
+                        jogador.y = p.y + p.h;
+                        jogador.vy = 0;
+                    }
+                }
+            }
+
+            // 3. Verifica se caiu no buraco
+            if (jogador.y > 600) sofrerDano();
+
+            // 4. Coletar Pizzas
+            for (let p of pizzas) {
+                if (!p.coletada && colide(jogador, p)) {
+                    p.coletada = true;
+                    pontos += 10;
+                    document.getElementById('scoreDisplay').innerText = pontos;
+                }
+            }
+
+            // 5. Atualizar Inimigos
+            for (let ini of inimigos) {
+                if (ini.tipo === 'alien') {
+                    ini.x += ini.vx;
+                    if (ini.x >= ini.maxX || ini.x <= ini.minX) ini.vx *= -1;
+                }
+                if (colide(jogador, ini)) sofrerDano();
+            }
+
+            // 6. Checar Vitória
+            if (colide(jogador, naveObjetivo)) {
+                vitoria();
+            }
+        }
+
+        function sofrerDano() {
+            vidas--;
+            document.getElementById('livesDisplay').innerText = vidas;
+            
+            if (vidas <= 0) {
+                derrota();
+            } else {
+                jogador.x = 50;
+                jogador.y = 200;
+                jogador.vx = 0;
+                jogador.vy = 0;
+            }
+        }
+
+        // --- DESENHAR O JOGO ---
+        function desenhar() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (!jogoRodando) return;
+
+            // Sistema de Câmera
+            ctx.save();
+            let cameraX = jogador.x - canvas.width / 3;
+            if (cameraX < 0) cameraX = 0;
+            
+            ctx.translate(-cameraX, 0);
+
+            // Desenha Plataformas
+            ctx.fillStyle = '#4a4e69';
+            for (let p of plataformas) {
+                ctx.fillRect(p.x, p.y, p.w, p.h);
+            }
+
+            // Desenha Pizzas
+            ctx.fillStyle = '#f4a261';
+            for (let p of pizzas) {
+                if (!p.coletada) {
+                    ctx.beginPath();
+                    ctx.arc(p.x + p.w/2, p.y + p.h/2, p.w/2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // Desenha Inimigos
+            for (let ini of inimigos) {
+                if (ini.tipo === 'alien') {
+                    ctx.fillStyle = '#2a9d8f';
+                    ctx.fillRect(ini.x, ini.y, ini.w, ini.h);
+                } else if (ini.tipo === 'espinho') {
+                    ctx.fillStyle = '#e76f51';
+                    ctx.beginPath();
+                    ctx.moveTo(ini.x + ini.w/2, ini.y);
+                    ctx.lineTo(ini.x + ini.w, ini.y + ini.h);
+                    ctx.lineTo(ini.x, ini.y + ini.h);
+                    ctx.fill();
+                }
+            }
+
+            // Desenha a Nave de Resgate
+            ctx.fillStyle = '#00b4d8';
+            ctx.fillRect(naveObjetivo.x, naveObjetivo.y, naveObjetivo.width, naveObjetivo.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(naveObjetivo.x + 20, naveObjetivo.y + 20, 40, 20);
+
+            // Desenha o Jogador
+            ctx.fillStyle = '#e94560';
+            ctx.fillRect(jogador.x, jogador.y, jogador.width, jogador.height);
+
+            ctx.restore();
+        }
+
+        // --- LOOP PRINCIPAL ---
+        function gameLoop() {
+            atualizar();
+            desenhar();
+            if (jogoRodando) {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        // --- FUNÇÕES DE ESTADO ---
+        function derrota() {
+            jogoRodando = false;
+            document.getElementById('gameOverScreen').classList.remove('hidden');
+        }
+
+        function vitoria() {
+            jogoRodando = false;
+            document.getElementById('victoryScreen').classList.remove('hidden');
+        }
+
+        function reiniciarJogo() {
+            document.getElementById('gameOverScreen').classList.add('hidden');
+            document.getElementById('victoryScreen').classList.add('hidden');
+            
+            pontos = 0;
+            vidas = 3;
+            document.getElementById('scoreDisplay').innerText = pontos;
+            document.getElementById('livesDisplay').innerText = vidas;
+            
+            jogador.x = 50;
+            jogador.y = 200;
+            jogador.vx = 0;
+            jogador.vy = 0;
+            
+            carregarNivel();
+            
+            jogoRodando = true;
+            gameLoop();
+        }
+
+        // Inicializar
+        carregarNivel();
+        gameLoop();
+    </script>
+</body>
+</html>
